@@ -60,10 +60,11 @@ class MediaScanner(private val context: Context) {
         queryCursor(uri, projection, null, null, sortOrder) { cursor ->
             val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
             val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)) ?: "Photo_$id.jpg"
-            val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE))
+            val reportedSize = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE))
             val mime = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)) ?: "image/jpeg"
             val date = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)) * 1000L
             val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id).toString()
+            val size = resolveContentSize(contentUri, reportedSize)
 
             list.add(
                 FileItem(
@@ -95,10 +96,11 @@ class MediaScanner(private val context: Context) {
         queryCursor(uri, projection, null, null, sortOrder) { cursor ->
             val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
             val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)) ?: "Video_$id.mp4"
-            val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
+            val reportedSize = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
             val mime = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)) ?: "video/mp4"
             val date = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_MODIFIED)) * 1000L
             val contentUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id).toString()
+            val size = resolveContentSize(contentUri, reportedSize)
 
             list.add(
                 FileItem(
@@ -113,6 +115,13 @@ class MediaScanner(private val context: Context) {
             )
         }
         return list
+    }
+
+    private fun resolveContentSize(uriString: String, reportedSize: Long): Long {
+        if (reportedSize > 0L) return reportedSize
+        return runCatching {
+            context.contentResolver.openAssetFileDescriptor(Uri.parse(uriString), "r")?.use { it.length }
+        }.getOrNull()?.takeIf { it > 0L } ?: reportedSize.coerceAtLeast(0L)
     }
 
     private fun queryAudio(): List<FileItem> {

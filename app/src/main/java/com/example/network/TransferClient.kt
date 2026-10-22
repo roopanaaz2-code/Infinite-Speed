@@ -251,6 +251,7 @@ class TransferClient(
                 setFixedLengthStreamingMode(sourceLength)
                 setRequestProperty("Content-Type", file.mimeType)
                 setRequestProperty("Content-Length", sourceLength.toString())
+                setRequestProperty("X-File-Size", sourceLength.toString())
                 setRequestProperty("X-File-Name", URLEncoder.encode(file.name, "UTF-8"))
                 setRequestProperty("X-File-Id", file.id)
                 setRequestProperty("X-File-Sha256", sha256ForFile(file))
@@ -306,7 +307,10 @@ class TransferClient(
                 return if (verified) Result.success(true)
                 else Result.failure(Exception("Receiver rejected file integrity verification"))
             } else {
-                return Result.failure(Exception("Server returned status $respCode during upload"))
+                val errorText = runCatching {
+                    conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                }.getOrDefault("")
+                return Result.failure(Exception("Server returned status $respCode during upload${if (errorText.isNotBlank()) ": $errorText" else ""}"))
             }
         } catch (e: Exception) {
             return Result.failure(e)

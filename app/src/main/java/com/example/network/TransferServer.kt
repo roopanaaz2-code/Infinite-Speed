@@ -300,7 +300,13 @@ class TransferServer(
         val fileName = SecurityUtils.sanitizeFileName(fileNameRaw)
         val fileId = headers["x-file-id"] ?: UUID.randomUUID().toString()
         val expectedSha256 = headers["x-file-sha256"] ?: ""
-        val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
+        val contentLength = headers["x-file-size"]?.toLongOrNull()?.takeIf { it > 0L }
+            ?: headers["content-length"]?.toLongOrNull()?.takeIf { it > 0L }
+            ?: 0L
+        if (contentLength <= 0L) {
+            sendJsonResponse(output, 411, JSONObject().put("error", "Missing upload length").toString())
+            return
+        }
 
         val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "InfiniteSpeed")
         if (!downloadDir.exists()) downloadDir.mkdirs()
