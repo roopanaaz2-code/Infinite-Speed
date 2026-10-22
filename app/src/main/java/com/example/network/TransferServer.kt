@@ -237,7 +237,7 @@ class TransferServer(
                         sessionToken = sessionToken
                     )
 
-                    if (autoAccept) {
+                    if (autoAccept || isSessionApproved(sessionToken)) {
                         approveSession(sessionToken)
                         sendJsonResponse(output, 200, JSONObject().put("status", "accepted").toString())
                     } else {

@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.InfiniteSpeedApplication
@@ -102,6 +103,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Settings
     val deviceName: String = transferManager.deviceName
+    val deviceId: String = transferManager.deviceId
     val pairingPin: String = transferManager.pairingPin
     val localIp: String get() = NetworkUtils.getLocalIpAddress()
 
@@ -160,6 +162,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoadingFiles.value = false
             _storageInfo.value = mediaScanner.getStorageStats()
         }
+    }
+
+    fun refreshFiles() {
+        loadFilesForCategory(_currentCategory.value, _searchQuery.value)
     }
 
     private fun applySorting() {
@@ -225,6 +231,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 clearSelection()
             }
+        }
+    }
+
+    fun connectFromQr(rawValue: String): Result<Unit> {
+        return try {
+            val uri = Uri.parse(rawValue)
+            if (uri.scheme != "infinitespeed" || uri.host != "pair") {
+                return Result.failure(IllegalArgumentException("Not an Infinite Speed pairing QR"))
+            }
+            val deviceId = uri.getQueryParameter("device").orEmpty()
+            val discovered = transferManager.discovery.discoveredDevices.value
+                .firstOrNull { it.id == deviceId }
+                ?: return Result.failure(IllegalArgumentException("Peer is not visible on the same Wi-Fi or hotspot"))
+            sendToPeer(PeerDevice(
+                id = discovered.id,
+                name = uri.getQueryParameter("name") ?: "Infinite Speed Peer",
+                ipAddress = discovered.ipAddress,
+                port = discovered.port,
+                connectionType = "QR / Wi-Fi LAN",
+                pairingPin = uri.getQueryParameter("pin")
+            ))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

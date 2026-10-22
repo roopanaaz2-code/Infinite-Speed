@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
 import com.example.ui.MainViewModel
 import com.example.ui.theme.CyanElectric
 import com.example.ui.theme.DarkNavyCard
@@ -73,7 +74,18 @@ fun ReceiveScreen(
     }
 
     val ip = viewModel.localIp
-    val qrPayload = "infinitespeed://pair?ip=$ip&port=8990&pin=${viewModel.pairingPin}&name=${viewModel.deviceName}"
+    val qrPayload = remember(ip, viewModel.deviceName, viewModel.deviceId, viewModel.pairingPin) {
+        Uri.Builder()
+            .scheme("infinitespeed")
+            .authority("pair")
+            .appendQueryParameter("v", "1")
+            .appendQueryParameter("device", viewModel.deviceId)
+            .appendQueryParameter("port", "8990")
+            .appendQueryParameter("pin", viewModel.pairingPin)
+            .appendQueryParameter("name", viewModel.deviceName)
+            .build()
+            .toString()
+    }
     val qrImageBitmap = remember(qrPayload) {
         QrCodeGenerator.generateQrImageBitmap(qrPayload, 480)
     }

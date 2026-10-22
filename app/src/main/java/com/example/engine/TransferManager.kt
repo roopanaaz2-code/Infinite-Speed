@@ -183,11 +183,23 @@ class TransferManager(
         currentTransferJob = scope.launch(Dispatchers.IO) {
             val sessionToken = SecurityUtils.generateSessionToken()
 
+            val pairedSessionToken = if (!peer.pairingPin.isNullOrBlank()) {
+                client.pairWithPin(peer, peer.pairingPin, sessionToken).getOrNull()
+            } else null
+            if (peer.pairingPin != null && pairedSessionToken == null) {
+                _activeTransferState.value = _activeTransferState.value.copy(
+                    isTransferring = false,
+                    status = TransferStatus.FAILED,
+                    errorMessage = "QR pairing failed: incorrect PIN or receiver unavailable"
+                )
+                return@launch
+            }
+
             val result = client.sendFiles(
                 peer = peer,
                 files = files,
                 senderName = deviceName,
-                sessionToken = sessionToken
+                sessionToken = pairedSessionToken ?: sessionToken
             ) { progress ->
                 val durationSec = ((System.currentTimeMillis() - transferStartTime) / 1000L).coerceAtLeast(1)
                 val avgSpeed = if (durationSec > 0) progress.overallBytesTransferred / durationSec else progress.speedBps

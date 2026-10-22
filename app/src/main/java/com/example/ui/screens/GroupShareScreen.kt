@@ -40,7 +40,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,15 +70,10 @@ fun GroupShareScreen(
     val selectedFiles by viewModel.selectedFiles.collectAsState()
     val discoveredDevices by viewModel.discoveredDevices.collectAsState()
 
-    val joinedPeers = remember {
-        mutableStateListOf(
-            PeerDevice("grp_1", "Pixel 9 Pro", "192.168.1.102", 8990, isPaired = true),
-            PeerDevice("grp_2", "Galaxy S24 Ultra", "192.168.1.108", 8990, isPaired = true)
-        )
-    }
+    // Never show placeholder phones: only peers discovered on the current LAN are real.
+    val joinedPeers = discoveredDevices
 
-    val ip = viewModel.localIp
-    val groupQrPayload = "infinitespeed://group-join?ip=$ip&port=8990&room=InfiniteSpeedRoom&pin=${viewModel.pairingPin}"
+    val groupQrPayload = "infinitespeed://pair?device=${viewModel.deviceId}&port=8990&pin=${viewModel.pairingPin}&name=${viewModel.deviceName}"
     val qrImage = remember(groupQrPayload) {
         QrCodeGenerator.generateQrImageBitmap(groupQrPayload, 420)
     }

@@ -40,7 +40,8 @@ data class PeerDevice(
     val deviceType: String = "Android",
     val isPaired: Boolean = false,
     val connectionType: String = "Wi-Fi LAN",
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeen: Long = System.currentTimeMillis(),
+    val pairingPin: String? = null
 )
 
 enum class TransferDirection {

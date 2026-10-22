@@ -156,7 +156,9 @@ fun MainContent(viewModel: MainViewModel) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        // Permissions handled gracefully
+        // The initial scan runs before Android finishes the permission dialog.
+        // Refresh now so Photos/Videos/Music and installed APKs become visible immediately.
+        viewModel.refreshFiles()
     }
 
     LaunchedEffect(Unit) {

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -57,6 +58,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +72,9 @@ import com.example.ui.theme.DarkNavyCard
 import com.example.ui.theme.DarkNavySurfaceVariant
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextWhite
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 @Composable
 fun RadarDiscoveryScreen(
@@ -77,6 +83,7 @@ fun RadarDiscoveryScreen(
 ) {
     val discoveredDevices by viewModel.discoveredDevices.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+    val context = LocalContext.current
 
     var showManualIpDialog by remember { mutableStateOf(false) }
     var manualIp by remember { mutableStateOf("") }
@@ -139,6 +146,25 @@ fun RadarDiscoveryScreen(
             }
 
             Row {
+                IconButton(onClick = {
+                    val options = GmsBarcodeScannerOptions.Builder()
+                        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                        .build()
+                    GmsBarcodeScanning.getClient(context, options).startScan()
+                        .addOnSuccessListener { barcode ->
+                            barcode.rawValue?.let {
+                                viewModel.connectFromQr(it).exceptionOrNull()?.let { error ->
+                                    Toast.makeText(context, error.message ?: "QR peer is not reachable", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.QrCode,
+                        contentDescription = "Scan pairing QR",
+                        tint = CyanElectric
+                    )
+                }
                 IconButton(onClick = { showManualIpDialog = true }) {
                     Icon(
                         imageVector = Icons.Default.AddLink,

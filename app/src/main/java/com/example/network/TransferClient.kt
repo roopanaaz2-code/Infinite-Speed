@@ -74,7 +74,7 @@ class TransferClient(
         }
     }
 
-    suspend fun pairWithPin(peer: PeerDevice, pin: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun pairWithPin(peer: PeerDevice, pin: String, sessionToken: String = SecurityUtils.generateSessionToken()): Result<String> = withContext(Dispatchers.IO) {
         try {
             val url = URL("http://${peer.ipAddress}:${peer.port}/api/pair")
             val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -87,7 +87,7 @@ class TransferClient(
 
             val json = JSONObject().apply {
                 put("pin", pin)
-                put("token", SecurityUtils.generateSessionToken())
+                put("token", sessionToken)
             }
 
             conn.outputStream.use { it.write(json.toString().toByteArray()) }
