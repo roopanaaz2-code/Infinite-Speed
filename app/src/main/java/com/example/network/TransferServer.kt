@@ -142,7 +142,7 @@ class TransferServer(
 
     private fun handleClient(socket: Socket) {
         try {
-            socket.soTimeout = 30000
+            socket.soTimeout = 300000
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
 
@@ -367,14 +367,35 @@ class TransferServer(
                 fos.flush()
             }
 
+            if (bytesReadTotal != contentLength) {
+                throw java.io.IOException("Incomplete upload: received $bytesReadTotal of $contentLength bytes")
+            }
+
+            val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+            val isVerified = expectedSha256.isEmpty() || expectedSha256.equals(actualSha256, ignoreCase = true)
+
+            if (!isVerified) {
+                mediaUri?.let { context.contentResolver.delete(it, null, null) }
+                if (mediaUri == null) destFile.delete()
+                _transferProgress.value = ServerTransferProgress(
+                    fileId = fileId,
+                    fileName = destFile.name,
+                    bytesTransferred = bytesReadTotal,
+                    totalBytes = contentLength,
+                    speedBps = 0,
+                    status = TransferStatus.FAILED,
+                    isVerified = false,
+                    error = "SHA-256 integrity mismatch"
+                )
+                sendJsonResponse(output, 200, JSONObject().put("success", false).put("verified", false).put("error", "SHA-256 integrity mismatch").toString())
+                return
+            }
+
             if (mediaUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 context.contentResolver.update(mediaUri, ContentValues().apply {
                     put(MediaStore.Downloads.IS_PENDING, 0)
                 }, null, null)
             }
-
-            val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
-            val isVerified = expectedSha256.isEmpty() || expectedSha256.equals(actualSha256, ignoreCase = true)
 
             _transferProgress.value = ServerTransferProgress(
                 fileId = fileId,
@@ -382,7 +403,7 @@ class TransferServer(
                 bytesTransferred = bytesReadTotal,
                 totalBytes = contentLength,
                 speedBps = 0,
-                status = if (isVerified) TransferStatus.COMPLETED else TransferStatus.FAILED,
+                status = TransferStatus.COMPLETED,
                 isVerified = isVerified,
                 error = if (isVerified) null else "SHA-256 integrity mismatch"
             )
@@ -397,6 +418,7 @@ class TransferServer(
             sendJsonResponse(output, 200, resp.toString())
         } catch (e: Exception) {
             mediaUri?.let { context.contentResolver.delete(it, null, null) }
+            if (mediaUri == null) destFile.delete()
             _transferProgress.value = ServerTransferProgress(
                 fileId = fileId,
                 fileName = destFile.name,

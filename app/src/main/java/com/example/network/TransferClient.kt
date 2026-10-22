@@ -240,23 +240,24 @@ class TransferClient(
                 }
                 FileInputStream(f)
             }
+            val sourceLength = resolveSourceLength(file)
 
             val uploadUrl = URL("http://${peer.ipAddress}:${peer.port}/api/upload")
             conn = (uploadUrl.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10000
-                readTimeout = 60000
+                readTimeout = 300000
                 requestMethod = "POST"
                 doOutput = true
-                setFixedLengthStreamingMode(file.size)
+                setFixedLengthStreamingMode(sourceLength)
                 setRequestProperty("Content-Type", file.mimeType)
-                setRequestProperty("Content-Length", file.size.toString())
+                setRequestProperty("Content-Length", sourceLength.toString())
                 setRequestProperty("X-File-Name", URLEncoder.encode(file.name, "UTF-8"))
                 setRequestProperty("X-File-Id", file.id)
                 setRequestProperty("X-File-Sha256", sha256ForFile(file))
                 setRequestProperty("X-Session-Token", currentSessionToken)
+                setRequestProperty("Connection", "close")
             }
 
-            val outputStream: OutputStream = conn.outputStream
             val buffer = ByteArray(128 * 1024) // 128KB chunk for high throughput
             val digest = MessageDigest.getInstance("SHA-256")
             var fileBytesSent = 0L
@@ -265,33 +266,38 @@ class TransferClient(
             var lastSentBytes = 0L
             var currentSpeed = 0L
 
-            var bytesRead: Int
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                if (isCancelled) {
-                    return Result.failure(Exception("Transfer cancelled"))
-                }
-                while (isPaused && !isCancelled) {
-                    Thread.sleep(100)
-                }
+            conn.outputStream.use { outputStream ->
+                var bytesRead: Int
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    if (isCancelled) {
+                        return Result.failure(Exception("Transfer cancelled"))
+                    }
+                    while (isPaused && !isCancelled) {
+                        Thread.sleep(100)
+                    }
 
-                outputStream.write(buffer, 0, bytesRead)
-                digest.update(buffer, 0, bytesRead)
-                fileBytesSent += bytesRead
+                    outputStream.write(buffer, 0, bytesRead)
+                    digest.update(buffer, 0, bytesRead)
+                    fileBytesSent += bytesRead
 
-                val now = System.currentTimeMillis()
-                val deltaMs = now - lastCalcTime
-                if (deltaMs >= 400) {
-                    val durationSec = deltaMs / 1000.0
-                    val deltaBytes = fileBytesSent - lastSentBytes
-                    currentSpeed = (deltaBytes / durationSec).toLong()
-                    lastSentBytes = fileBytesSent
-                    lastCalcTime = now
+                    val now = System.currentTimeMillis()
+                    val deltaMs = now - lastCalcTime
+                    if (deltaMs >= 400) {
+                        val durationSec = deltaMs / 1000.0
+                        val deltaBytes = fileBytesSent - lastSentBytes
+                        currentSpeed = (deltaBytes / durationSec).toLong()
+                        lastSentBytes = fileBytesSent
+                        lastCalcTime = now
+                    }
+
+                    onBytesChunkSent(bytesRead.toLong(), currentSpeed, fileBytesSent)
                 }
-
-                onBytesChunkSent(bytesRead.toLong(), currentSpeed, fileBytesSent)
+                outputStream.flush()
             }
 
-            outputStream.flush()
+            if (fileBytesSent != sourceLength) {
+                return Result.failure(Exception("Source changed while reading: sent $fileBytesSent of $sourceLength bytes"))
+            }
 
             val respCode = conn.responseCode
             if (respCode == 200) {
@@ -346,5 +352,14 @@ class TransferClient(
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun resolveSourceLength(file: FileItem): Long {
+        val discovered = if (file.path.startsWith("content://")) {
+            context.contentResolver.openAssetFileDescriptor(Uri.parse(file.path), "r")?.use { it.length }
+        } else {
+            File(file.path).length()
+        }
+        return if (discovered != null && discovered >= 0L) discovered else file.size
     }
 }
