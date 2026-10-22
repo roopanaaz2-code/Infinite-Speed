@@ -1,0 +1,6 @@
+{
+  "name": "Infinite Speed",
+  "description": "High-performance offline & local network file sharing with ultra-fast transfer speeds, QR pairing, and secure end-to-end delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
