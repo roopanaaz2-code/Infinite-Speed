@@ -37,7 +37,7 @@ class MediaScanner(private val context: Context) {
             FileCategory.OTHER -> results.addAll(queryDocuments())
         }
 
-        if (query.isNotBlank()) {
+        return if (query.isNotBlank()) {
             val q = query.trim().lowercase()
             results.filter { it.name.lowercase().contains(q) }
         } else {

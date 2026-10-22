@@ -1,7 +1,11 @@
 package com.example.network
 
 import android.content.Context
+import android.content.ContentValues
+import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import com.example.model.FileItem
 import com.example.model.TransferDirection
 import com.example.model.TransferStatus
@@ -19,13 +23,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
@@ -96,6 +98,10 @@ class TransferServer(
         }
     }
 
+    private fun isSessionApproved(token: String): Boolean = token.isNotBlank() && synchronized(acceptedSessions) {
+        acceptedSessions.contains(token)
+    }
+
     fun start(port: Int = 8990) {
         if (_isRunning.value) return
 
@@ -140,8 +146,7 @@ class TransferServer(
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
 
-            val reader = BufferedReader(InputStreamReader(input, Charsets.UTF_8))
-            val requestLine = reader.readLine() ?: return socket.close()
+            val requestLine = readAsciiLine(input) ?: return socket.close()
             val tokens = requestLine.split(" ")
             if (tokens.size < 2) return socket.close()
 
@@ -151,13 +156,13 @@ class TransferServer(
             val query = if (rawPath.contains("?")) rawPath.substringAfter("?") else ""
 
             val headers = mutableMapOf<String, String>()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                if (line.isNullOrBlank()) break
-                val colon = line!!.indexOf(":")
+            while (true) {
+                val line = readAsciiLine(input) ?: break
+                if (line.isBlank()) break
+                val colon = line.indexOf(":")
                 if (colon > 0) {
-                    val key = line!!.substring(0, colon).trim().lowercase()
-                    val value = line!!.substring(colon + 1).trim()
+                    val key = line.substring(0, colon).trim().lowercase()
+                    val value = line.substring(colon + 1).trim()
                     headers[key] = value
                 }
             }
@@ -178,7 +183,7 @@ class TransferServer(
                 // PIN / Pairing verification
                 method == "POST" && path == "/api/pair" -> {
                     val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-                    val body = readBody(reader, contentLength)
+                    val body = readBody(input, contentLength)
                     val json = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
                     val pin = json.optString("pin")
                     val token = json.optString("token", UUID.randomUUID().toString())
@@ -203,7 +208,7 @@ class TransferServer(
                 // Transfer Manifest (Sender announces files)
                 method == "POST" && path == "/api/manifest" -> {
                     val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-                    val body = readBody(reader, contentLength)
+                    val body = readBody(input, contentLength)
                     val json = JSONObject(body)
                     val senderName = json.optString("senderName", "Unknown")
                     val sessionToken = json.optString("sessionToken", UUID.randomUUID().toString())
@@ -243,7 +248,21 @@ class TransferServer(
 
                 // File Upload (Sender streams file to this Receiver)
                 method == "POST" && path == "/api/upload" -> {
-                    handleFileUpload(input, output, headers)
+                    val token = headers["x-session-token"].orEmpty()
+                    if (!isSessionApproved(token)) {
+                        sendJsonResponse(output, 403, JSONObject().put("error", "Transfer session is not approved").toString())
+                    } else {
+                        handleFileUpload(input, output, headers)
+                    }
+                }
+
+                // Browser upload to this device over the local Wi-Fi connection.
+                method == "POST" && path == "/api/web-upload" -> handleFileUpload(input, output, headers)
+
+                // Sender polls while the user reviews the incoming transfer dialog.
+                method == "GET" && path == "/api/session" -> {
+                    val token = queryParams(query)["token"].orEmpty()
+                    sendJsonResponse(output, 200, JSONObject().put("approved", isSessionApproved(token)).toString())
                 }
 
                 // File Download (Recipient or Web browser downloads file from this device)
@@ -295,6 +314,16 @@ class TransferServer(
             counter++
         }
 
+        val mediaUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, headers["content-type"] ?: "application/octet-stream")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/InfiniteSpeed")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        } else null
+
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(128 * 1024) // 128KB buffer for max throughput
         var bytesReadTotal = 0L
@@ -304,7 +333,9 @@ class TransferServer(
         var currentSpeed = 0L
 
         try {
-            FileOutputStream(destFile).use { fos ->
+            val destination = mediaUri?.let { context.contentResolver.openOutputStream(it) }
+                ?: FileOutputStream(destFile)
+            destination.use { fos ->
                 var read: Int
                 while (bytesReadTotal < contentLength) {
                     val toRead = minOf(buffer.size.toLong(), contentLength - bytesReadTotal).toInt()
@@ -336,6 +367,12 @@ class TransferServer(
                 fos.flush()
             }
 
+            if (mediaUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.update(mediaUri, ContentValues().apply {
+                    put(MediaStore.Downloads.IS_PENDING, 0)
+                }, null, null)
+            }
+
             val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
             val isVerified = expectedSha256.isEmpty() || expectedSha256.equals(actualSha256, ignoreCase = true)
 
@@ -355,10 +392,11 @@ class TransferServer(
                 put("bytesReceived", bytesReadTotal)
                 put("sha256", actualSha256)
                 put("verified", isVerified)
-                put("savedPath", destFile.absolutePath)
+                put("savedPath", mediaUri?.toString() ?: destFile.absolutePath)
             }
             sendJsonResponse(output, 200, resp.toString())
         } catch (e: Exception) {
+            mediaUri?.let { context.contentResolver.delete(it, null, null) }
             _transferProgress.value = ServerTransferProgress(
                 fileId = fileId,
                 fileName = destFile.name,
@@ -434,6 +472,8 @@ class TransferServer(
         sb.append("<div class='card'>")
         sb.append("<div class='header'><div class='logo'>&infin;</div><div><h2 style='margin:0;'>Infinite Speed</h2><span class='meta'>Direct Web Share &bull; Local High-Speed Delivery</span></div></div>")
         sb.append("<p>Shared files from <b>$deviceName</b>. Tap below to download directly over local Wi-Fi without internet.</p>")
+        sb.append("<div class='file-row'><div><div style='font-weight:600;'>Send files to this phone</div><div class='meta'>Choose files, then upload over the local Wi-Fi connection.</div></div><input id='filePicker' type='file' multiple onchange='uploadFiles(this.files)' /></div>")
+        sb.append("<div id='uploadStatus' class='meta'></div>")
 
         if (files.isEmpty()) {
             sb.append("<div style='text-align:center;padding:40px;color:#94a3b8;'>No files are currently queued for sharing. Select files in the app to share with this browser.</div>")
@@ -445,22 +485,37 @@ class TransferServer(
                 sb.append("</div>")
             }
         }
+        sb.append("<script>async function uploadFiles(files){const s=document.getElementById('uploadStatus');for(const f of files){s.textContent='Uploading '+f.name+'...';const r=await fetch('/api/web-upload',{method:'POST',headers:{'X-File-Name':encodeURIComponent(f.name),'Content-Type':f.type||'application/octet-stream'},body:f});if(!r.ok){s.textContent='Upload failed for '+f.name;return;}}s.textContent='Upload complete. Files are saved in Download/InfiniteSpeed.';}</script>")
         sb.append("</div></body></html>")
 
         val htmlBytes = sb.toString().toByteArray(Charsets.UTF_8)
         sendRawResponse(output, 200, "OK", "text/html; charset=utf-8", htmlBytes)
     }
 
-    private fun readBody(reader: BufferedReader, length: Int): String {
+    private fun readBody(input: InputStream, length: Int): String {
         if (length <= 0) return ""
-        val chars = CharArray(length)
+        val bytes = ByteArray(length)
         var total = 0
         while (total < length) {
-            val r = reader.read(chars, total, length - total)
+            val r = input.read(bytes, total, length - total)
             if (r == -1) break
             total += r
         }
-        return String(chars, 0, total)
+        return String(bytes, 0, total, Charsets.UTF_8)
+    }
+
+    private fun readAsciiLine(input: InputStream): String? {
+        val bytes = ByteArrayOutputStream()
+        while (true) {
+            val current = input.read()
+            if (current == -1) return if (bytes.size() == 0) null else bytes.toString(Charsets.ISO_8859_1.name())
+            if (current == '\n'.code) {
+                val raw = bytes.toByteArray()
+                val length = if (raw.lastOrNull() == '\r'.code.toByte()) raw.size - 1 else raw.size
+                return String(raw, 0, length, Charsets.ISO_8859_1)
+            }
+            bytes.write(current)
+        }
     }
 
     private fun queryParams(query: String): Map<String, String> {

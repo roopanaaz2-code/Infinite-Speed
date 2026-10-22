@@ -36,6 +36,7 @@ data class ClientTransferProgress(
 class TransferClient(
     private val context: Context
 ) {
+    private var currentSessionToken: String = ""
     @Volatile
     private var isCancelled = false
 
@@ -112,6 +113,7 @@ class TransferClient(
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         isCancelled = false
         isPaused = false
+        currentSessionToken = sessionToken
 
         try {
             // 1. Send Transfer Manifest
@@ -133,6 +135,7 @@ class TransferClient(
                     put("name", f.name)
                     put("size", f.size)
                     put("mimeType", f.mimeType)
+                    put("sha256", sha256ForFile(f))
                 }
                 filesArray.put(item)
             }
@@ -147,6 +150,12 @@ class TransferClient(
             val manifestCode = manifestConn.responseCode
             if (manifestCode != 200) {
                 return@withContext Result.failure(Exception("Receiver rejected transfer manifest ($manifestCode)"))
+            }
+            val manifestResponse = manifestConn.inputStream.bufferedReader().use { it.readText() }
+            val manifestStatus = JSONObject(manifestResponse).optString("status")
+            if (manifestStatus == "pending_user_approval") {
+                val approved = waitForApproval(peer, sessionToken)
+                if (!approved) return@withContext Result.failure(Exception("Receiver did not approve the transfer"))
             }
 
             var overallBytesSent = 0L
@@ -243,6 +252,8 @@ class TransferClient(
                 setRequestProperty("Content-Length", file.size.toString())
                 setRequestProperty("X-File-Name", URLEncoder.encode(file.name, "UTF-8"))
                 setRequestProperty("X-File-Id", file.id)
+                setRequestProperty("X-File-Sha256", sha256ForFile(file))
+                setRequestProperty("X-Session-Token", currentSessionToken)
             }
 
             val outputStream: OutputStream = conn.outputStream
@@ -284,7 +295,10 @@ class TransferClient(
 
             val respCode = conn.responseCode
             if (respCode == 200) {
-                return Result.success(true)
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val verified = runCatching { JSONObject(response).optBoolean("verified", false) }.getOrDefault(false)
+                return if (verified) Result.success(true)
+                else Result.failure(Exception("Receiver rejected file integrity verification"))
             } else {
                 return Result.failure(Exception("Server returned status $respCode during upload"))
             }
@@ -294,5 +308,43 @@ class TransferClient(
             try { inputStream?.close() } catch (_: Exception) {}
             try { conn?.disconnect() } catch (_: Exception) {}
         }
+    }
+
+    private fun waitForApproval(peer: PeerDevice, token: String): Boolean {
+        repeat(150) {
+            if (isCancelled) return false
+            try {
+                val url = URL("http://${peer.ipAddress}:${peer.port}/api/session?token=${URLEncoder.encode(token, "UTF-8")}")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 3000
+                    readTimeout = 3000
+                    requestMethod = "GET"
+                }
+                if (conn.responseCode == 200) {
+                    val approved = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).optBoolean("approved")
+                    if (approved) return true
+                }
+            } catch (_: Exception) { }
+            Thread.sleep(1000)
+        }
+        return false
+    }
+
+    private fun sha256ForFile(file: FileItem): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val input = if (file.path.startsWith("content://")) {
+            context.contentResolver.openInputStream(Uri.parse(file.path))
+        } else {
+            FileInputStream(File(file.path))
+        } ?: throw IllegalStateException("Cannot open file: ${file.name}")
+        input.use { stream ->
+            val buffer = ByteArray(128 * 1024)
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,14 +116,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addSharedUri(uri: Uri, mimeType: String) {
-        val fileName = uri.lastPathSegment ?: "shared_file_${System.currentTimeMillis()}"
+        val resolver = contentResolver
+        var fileName = uri.lastPathSegment ?: "shared_file_${System.currentTimeMillis()}"
+        var size = 0L
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (nameIndex >= 0) cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }?.let { fileName = it }
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+            }
+        }
+        val category = when {
+            mimeType.startsWith("image/") -> FileCategory.PHOTO
+            mimeType.startsWith("video/") -> FileCategory.VIDEO
+            mimeType.startsWith("audio/") -> FileCategory.AUDIO
+            mimeType == "application/vnd.android.package-archive" -> FileCategory.APP
+            else -> FileCategory.OTHER
+        }
         val item = FileItem(
             id = "shared_${System.currentTimeMillis()}_${fileName.hashCode()}",
             name = fileName,
             path = uri.toString(),
-            size = 1024L * 1024L,
+            size = size,
             mimeType = mimeType,
-            category = FileCategory.OTHER,
+            category = category,
             isSelected = true
         )
         viewModel.toggleFileSelection(item)
@@ -147,6 +165,7 @@ fun MainContent(viewModel: MainViewModel) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
             perms.add(Manifest.permission.READ_MEDIA_IMAGES)
             perms.add(Manifest.permission.READ_MEDIA_VIDEO)
+            if (Build.VERSION.SDK_INT >= 34) perms.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
             perms.add(Manifest.permission.READ_MEDIA_AUDIO)
             perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {
