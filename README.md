@@ -4,6 +4,24 @@
 
 ---
 
+## 📥 Download & Install APK
+
+You can download and install Infinite Speed directly onto any Android phone (Android 7.0 to Android 15+):
+
+1. **Direct Repository Download:**
+   - Tap [`InfiniteSpeed-v1.0.apk`](./InfiniteSpeed-v1.0.apk) or [`release/InfiniteSpeed.apk`](./release/InfiniteSpeed.apk) in this repository and tap **Download Raw**.
+2. **From GitHub Releases:**
+   - Go to the **[Releases](../../releases)** section on GitHub and download `InfiniteSpeed-v1.0.apk`.
+3. **From GitHub Actions:**
+   - Go to the **Actions** tab, tap the latest workflow run, and download the `InfiniteSpeed-APK` artifact.
+
+### How to Install on Android
+- Once downloaded, open the `.apk` file from your Downloads folder.
+- If prompted, tap **Settings** and allow **"Install unknown apps"** for your browser or file manager.
+- Tap **Install** and open Infinite Speed!
+
+---
+
 ## ⚡ Key Highlights & Architecture
 
 - **Ultra-Fast Offline Sharing:** Achieves sustained maximum local throughput (up to hardware Wi-Fi PHY limits) without consuming mobile data, internet quotas, or routing through external servers.
