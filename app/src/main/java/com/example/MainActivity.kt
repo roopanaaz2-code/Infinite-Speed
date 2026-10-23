@@ -41,11 +41,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import com.example.model.FileCategory
 import com.example.model.FileItem
+import com.example.ads.AdMobAds
 import com.example.ui.MainViewModel
 import com.example.ui.Screen
 import com.example.ui.screens.ActiveTransferScreen
@@ -65,11 +68,14 @@ import com.example.ui.theme.TextWhite
 
 class MainActivity : ComponentActivity() {
 
+    private var adsReady by mutableStateOf(false)
+
     private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        AdMobAds.initialize(this) { adsReady = true }
 
         handleIncomingSharedIntent(intent)
 
@@ -77,7 +83,7 @@ class MainActivity : ComponentActivity() {
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
             InfiniteSpeedTheme(darkTheme = isDarkTheme) {
-                MainContent(viewModel = viewModel)
+                MainContent(viewModel = viewModel, adsReady = adsReady)
             }
         }
     }
@@ -149,7 +155,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainContent(viewModel: MainViewModel) {
+fun MainContent(viewModel: MainViewModel, adsReady: Boolean = false) {
     val currentScreen by viewModel.currentScreen.collectAsState()
 
     // Request necessary runtime permissions
@@ -270,7 +276,7 @@ fun MainContent(viewModel: MainViewModel) {
                 label = "screenTransition"
             ) { screen ->
                 when (screen) {
-                    Screen.HOME -> HomeScreen(viewModel = viewModel)
+                    Screen.HOME -> HomeScreen(viewModel = viewModel, adsReady = adsReady)
                     Screen.SEND_FILE_PICKER -> SendFilePickerScreen(viewModel = viewModel)
                     Screen.RADAR_DISCOVERY -> RadarDiscoveryScreen(viewModel = viewModel)
                     Screen.RECEIVE -> ReceiveScreen(viewModel = viewModel)

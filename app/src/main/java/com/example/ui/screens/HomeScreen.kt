@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.TransferEntity
+import com.example.ads.AdMobBanner
 import com.example.model.FileCategory
 import com.example.model.TransferDirection
 import com.example.model.TransferStatus
@@ -87,6 +88,7 @@ import com.example.ui.theme.TextWhite
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
+    adsReady: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val storageInfo by viewModel.storageInfo.collectAsState()
@@ -597,6 +599,12 @@ fun HomeScreen(
         } else {
             items(recentTransfers) { item ->
                 RecentTransferRow(item)
+            }
+        }
+
+        if (adsReady) {
+            item {
+                AdMobBanner(modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
