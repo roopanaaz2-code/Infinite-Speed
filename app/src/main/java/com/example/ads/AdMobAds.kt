@@ -7,7 +7,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.lifecycleScope
 import com.example.BuildConfig
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -15,8 +14,6 @@ import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.MobileAds
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 object AdMobAds {
     fun initialize(activity: Activity, onReady: () -> Unit) {
@@ -32,11 +29,11 @@ object AdMobAds {
     }
 
     private fun initializeSdk(activity: Activity, onReady: () -> Unit) {
-        activity.lifecycleScope.launch(Dispatchers.IO) {
+        Thread {
             MobileAds.initialize(activity) {
                 activity.runOnUiThread(onReady)
             }
-        }
+        }.start()
     }
 }
 
